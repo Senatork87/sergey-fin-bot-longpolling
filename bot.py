@@ -1,11 +1,10 @@
-
 import os
 import logging
-import openai
-from aiogram import Bot, Dispatcher, Router, types
+import asyncio
+from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
-from aiogram.types import Message
 from aiogram.client.session.aiohttp import AiohttpSession
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,43 +12,31 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-openai.api_key = OPENAI_API_KEY
-logging.basicConfig(level=logging.INFO)
+bot = Bot(token=TELEGRAM_TOKEN, parse_mode=ParseMode.HTML, session=AiohttpSession())
+dp = Dispatcher()
+openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-router = Router()
+@dp.message()
+async def handle_message(message: types.Message):
+    if not message.text:
+        return
+    await message.answer("Думаю...")
 
-SYSTEM_PROMPT = """Ты — Сергей Костюхин. Финансовый директор, эксперт по корпоративным финансам и налогообложению.
-Ты говоришь коротко, по делу, без воды и извинений. Твой стиль — прямой, уверенный, с иронией по делу.
-Ты объясняешь сложные вещи простыми словами, через кейсы и цифры. Ты отвечаешь на вопросы предпринимателей:
-по деньгам, налогам, финучёту, бюджетам, рентабельности и кассовым разрывам.
-"""
-
-async def ask_openai(question: str) -> str:
     try:
-        response = await openai.ChatCompletion.acreate(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": question}
-            ],
+        completion = await openai_client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": message.text}],
             temperature=0.7,
-            max_tokens=800
         )
-        return response.choices[0].message.content.strip()
+        reply_text = completion.choices[0].message.content
+        await message.answer(reply_text.strip())
     except Exception as e:
-        return f"Ошибка OpenAI: {e}"
-
-@router.message()
-async def handle_message(message: Message):
-    reply = await ask_openai(message.text.strip())
-    await message.answer(reply)
+        logging.exception("OpenAI error:")
+        await message.answer("Ошибка OpenAI: " + str(e))
 
 async def main():
-    bot = Bot(token=TELEGRAM_TOKEN, parse_mode=ParseMode.HTML, session=AiohttpSession())
-    dp = Dispatcher()
-    dp.include_router(router)
+    logging.basicConfig(level=logging.INFO)
     await dp.start_polling(bot)
 
-if __name__ == '__main__':
-    import asyncio
+if __name__ == "__main__":
     asyncio.run(main())
